@@ -1,6 +1,6 @@
-# Jira Sprint Manager
+# SCRUMASTER!: The Jira Sprint Manager
 
-Jira Sprint Manager is a fun and educational game designed to simulate managing a sprint in Jira. The objective is to manage your sprint backlog, catch tasks, avoid bugs, and complete sprints successfully.
+SCRUMASTER! is a fun and educational game designed to simulate managing a sprint in Jira. The objective is to manage your sprint backlog, catch tasks, avoid bugs, and complete sprints successfully.
 
 ## Game Overview
 
