@@ -2,6 +2,8 @@
 
 SCRUMASTER! is a fun and educational game designed to simulate managing a sprint in Jira. The objective is to manage your sprint backlog, catch tasks, avoid bugs, and complete sprints successfully.
 
+![scrumaster.p8.png](scrumaster.p8.png)
+
 ## Game Overview
 
 In this game, you take on the role of a Scrum Master managing a sprint. You need to:
