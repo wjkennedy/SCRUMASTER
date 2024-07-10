@@ -1,7 +1,7 @@
 pico-8 cartridge // http://www.pico-8.com
 version 42
 __lua__
--- pico-8 game: jira sprint manager
+-- pico-8 game: scrumaster!
 
 -- constants
 local sprint_capacity = 20
