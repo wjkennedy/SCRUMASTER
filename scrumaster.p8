@@ -3,340 +3,145 @@ version 42
 __lua__
 -- pico-8 game: scrumaster!
 
--- constants
-local sprint_capacity = 20
-local max_tasks = 15
-local bucket_speed = 2
-local fall_speed = 1
-local bug_pause_time = 60 -- time to pause when a bug is found
-local game_over_time = 120 -- time to show "game over" screen (2 seconds at 30 fps)
-local drop_interval = 30 -- frames between drops
-local capacity_increase_probability = 0.5 -- 50% chance
-local high_sp_threshold = 6 -- consider high sp as 6 or more
-local min_unplanned_work = 2
-local max_unplanned_work = 10
-local unplanned_work_sprite_index = 1 -- set the sprite index for unplanned work
-
 -- colors
-local jira_blue = 12
-local white = 7
-local red = 8
-local high_priority = 9 -- yellow
-local medium_priority = 10 -- orange
-local low_priority = 11 -- green
-local green = 11
+local jira_blue=12
+local white=7
+local highlight=5
 
 -- game state
-backlog = {}
-falling_tasks = {}
-unplanned_tasks = {}
-bucket = {x = 64, y = 120, width = 16, height = 8, sprite_index = 0}
-burndown = 0
-capacity = sprint_capacity
-game_over = false
-sprint_number = 1
-bug_found = false
-bug_timer = 0
-game_over_timer = 0
-drop_timer = 0
-wip_admonished = false
-capacity_increase_message = false
-capacity_increase_timer = 0
-
--- splash screen state
-show_splash = true
-splash_timer = 0
+backlog={}
+in_progress={}
+complete={}
+selected_column=1
+selected_task=1
+show_splash=true
+splash_timer=0
 
 -- task generation
 function generate_task()
-    local priority = flr(rnd(3)) + 1 -- random priority between 1 and 3
-    local priority_color
-    if priority == 1 then
-        priority_color = low_priority
-    elseif priority == 2 then
-        priority_color = medium_priority
-    else
-        priority_color = high_priority
-    end
-    local task = {
-        title = "task "..tostr(#backlog + 1),
-        story_points = flr(rnd(8)) + 1, -- random story points between 1 and 8
-        bug_probability = 0.5, -- 50% bug probability
-        x = rnd(120), -- random x position
-        y = -8, -- start above the screen
-        priority = priority,
-        priority_color = priority_color,
-        unplanned = false
+    local task={
+        title="task "..tostr(#backlog+#in_progress+#complete+1),
+        story_points=flr(rnd(8))+1
     }
     return task
 end
 
-function generate_unplanned_task()
-    local task = {
-        title = "unplanned "..tostr(#unplanned_tasks + 1),
-        story_points = flr(rnd(2)) + 1, -- low story points (1-2 sp)
-        actual_multiplier = flr(rnd(4)) + 2, -- actual points between 2x and 5x
-        x = rnd(120), -- random x position
-        y = -8, -- start above the screen
-        priority = 1, -- low priority
-        priority_color = low_priority,
-        unplanned = true,
-        sprite_index = unplanned_work_sprite_index -- set the sprite index for unplanned work
-    }
-    return task
-end
-
--- initialize backlog
 function init_backlog()
-    backlog = {}
-    for i = 1, max_tasks do
-        add(backlog, generate_task())
-    end
-    init_unplanned_work()
-end
-
--- initialize unplanned work
-function init_unplanned_work()
-    unplanned_tasks = {}
-    local num_unplanned = flr(rnd(max_unplanned_work - min_unplanned_work + 1)) + min_unplanned_work
-    for i = 1, num_unplanned do
-        add(unplanned_tasks, generate_unplanned_task())
+    backlog={}
+    in_progress={}
+    complete={}
+    for i=1,10 do
+        add(backlog,generate_task())
     end
 end
 
--- add falling task
-function add_falling_task()
-    if #unplanned_tasks > 0 and rnd(1) < 0.3 then -- 30% chance to drop unplanned work
-        local task = deli(unplanned_tasks, 1)
-        add(falling_tasks, task)
-    elseif #backlog > 0 then
-        local task = deli(backlog, 1)
-        add(falling_tasks, task)
-    end
-end
-
--- move bucket
-function move_bucket()
-    if btn(0) then
-        bucket.x -= bucket_speed
-    end
-    if btn(1) then
-        bucket.x += bucket_speed
-    end
-    -- keep bucket within screen bounds
-    bucket.x = mid(0, bucket.x, 128 - bucket.width)
-end
-
--- find index of a task in a list
-function indexof(list, item)
-    for i = 1, #list do
-        if list[i] == item then
-            return i
-        end
-    end
-    return nil
-end
-
--- update falling tasks
-function update_falling_tasks()
-    drop_timer += 1
-    if drop_timer > drop_interval then
-        add_falling_task()
-        drop_timer = 0
-    end
-
-    for task in all(falling_tasks) do
-        task.y += fall_speed
-        -- check if task is caught by the bucket
-        if task.y >= bucket.y and task.y <= bucket.y + bucket.height and task.x >= bucket.x and task.x <= bucket.x + bucket.width then
-            -- calculate actual story points (considering bugs)
-            local actual_points = task.story_points
-            if task.unplanned then
-                actual_points *= task.actual_multiplier -- multiply for unplanned work
-            elseif rnd(1) < task.bug_probability then
-                actual_points *= 2 -- double points if it has bugs
-                bug_found = true
-                bug_timer = bug_pause_time
-                sfx(2) -- buzzer sound
-                -- check for capacity increase
-                if (task.priority == 3 or task.story_points >= high_sp_threshold) and rnd(1) < capacity_increase_probability then
-                    capacity += 2
-                    capacity_increase_message = true
-                    capacity_increase_timer = 60 -- show message for 1 second
-                    sfx(3) -- capacity increase sound
-                end
-            else
-                sfx(0) -- happy fanfare for catching a card
-            end
-            burndown += actual_points
-            capacity -= task.story_points
-            deli(falling_tasks, indexof(falling_tasks, task))
-        elseif task.y > 128 then
-            -- remove task if it falls off the screen
-            deli(falling_tasks, indexof(falling_tasks, task))
+-- draw a single column
+function draw_column(name,tasks,x)
+    rect(x,0,x+39,127,jira_blue)
+    print(name,x+2,2,jira_blue)
+    for i=1,#tasks do
+        local y=10+(i-1)*8
+        local selected=(current_column==selected_column and selected_task==i)
+        if selected then
+            rectfill(x+1,y-1,x+38,y+7,highlight)
+            print(tasks[i].title,x+2,y,0)
+        else
+            print(tasks[i].title,x+2,y,jira_blue)
         end
     end
 end
 
--- draw splash screen
-function draw_splash()
-    cls()
-    local base_y = 64
-    local t = splash_timer / 30
-    local text = "scrumaster"
-    local text_length = #text * 8
-    local start_x = (128 - text_length) / 2
-    for i = 1, #text do
-        local char = sub(text, i, i)
-        local y = base_y + 10 * sin(t + i / 6.5)
-        print(char, start_x + (i - 1) * 8, y, jira_blue)
-    end
-    print("press x to start", 30, 90, white)
-end
-
--- draw ui
+-- draw the ui with three columns
 function draw_ui()
     cls()
-    -- draw backlog
-    print("backlog", 2, 2, jira_blue)
-    for i = 1, #backlog do
-        local task = backlog[i]
-        print(task.title .. " (" .. task.story_points .. " sp)", 2, 10 + i * 8, jira_blue)
+    current_column=1
+    draw_column("backlog",backlog,0)
+    current_column=2
+    draw_column("doing",in_progress,44)
+    current_column=3
+    draw_column("done",complete,88)
+end
+
+-- handle board interactions
+function update_board()
+    local columns={backlog,in_progress,complete}
+    local cur=columns[selected_column]
+    if btnp(0) then
+        selected_column=max(1,selected_column-1)
+        cur=columns[selected_column]
+        selected_task=min(selected_task,#cur)
+        if selected_task<1 then selected_task=1 end
+    elseif btnp(1) then
+        selected_column=min(3,selected_column+1)
+        cur=columns[selected_column]
+        selected_task=min(selected_task,#cur)
+        if selected_task<1 then selected_task=1 end
     end
-
-    -- draw burndown and capacity
-    print("burndown: " .. burndown, 2, 100, white)
-    print("capacity: " .. capacity, 2, 110, white)
-    print("sprint: " .. sprint_number, 2, 120, white)
-
-    -- draw bucket
-    spr(bucket.sprite_index, bucket.x, bucket.y)
-
-    -- draw falling tasks
-    for task in all(falling_tasks) do
-        if task.unplanned then
-            spr(task.sprite_index, task.x, task.y) -- use the specified sprite index for unplanned work
-        else
-            rectfill(task.x, task.y, task.x + 8, task.y + 8, jira_blue)
+    if btnp(2) then
+        selected_task=max(1,selected_task-1)
+    elseif btnp(3) then
+        selected_task=min(#cur,selected_task+1)
+    end
+    if btnp(5) then -- move forward
+        if selected_column<3 and #cur>0 then
+            local task=deli(cur,selected_task)
+            add(columns[selected_column+1],task)
+            cur=columns[selected_column]
+            if selected_task>#cur then selected_task=#cur end
+            if selected_task<1 then selected_task=1 end
         end
-        print(task.story_points .. " sp", task.x, task.y + 2, white)
-        pset(task.x + 4, task.y + 4, task.priority_color) -- draw priority indicator
-    end
-
-    -- draw bug message if a bug is found
-    if bug_found then
-        print("bug found!", 50, 30, red)
-    end
-
-    -- draw capacity increase message
-    if capacity_increase_message then
-        print("+2 capacity", 50, 50, green)
+    elseif btnp(4) then -- move back
+        if selected_column>1 and #cur>0 then
+            local task=deli(cur,selected_task)
+            add(columns[selected_column-1],task)
+            selected_column-=1
+            cur=columns[selected_column]
+            if selected_task>#cur then selected_task=#cur end
+            if selected_task<1 then selected_task=1 end
+        end
     end
 end
 
--- draw game over message
-function draw_game_over()
-    print("game over!", 50, 64, white)
-    if wip_admonished then
-        print("limit your wip!", 40, 80, red)
+-- splash screen
+function draw_splash()
+    cls()
+    local text="scrumaster"
+    local text_length=#text*8
+    local start_x=(128-text_length)/2
+    local base_y=64
+    local t=splash_timer/30
+    for i=1,#text do
+        local char=sub(text,i,i)
+        local y=base_y+10*sin(t+i/6.5)
+        print(char,start_x+(i-1)*8,y,jira_blue)
     end
+    print("press x to start",30,90,white)
 end
 
--- main update loop
+-- update
 function _update()
     if show_splash then
-        splash_timer += 1
-        if splash_timer == 1 then
-            music(0) -- start the intro music
-        end
-        if btnp(5) then -- 'x' to start the game
-            music(-1) -- stop the intro music
-            show_splash = false
+        splash_timer+=1
+        if btnp(5) then
+            show_splash=false
             init_backlog()
         end
     else
-        if game_over then
-            game_over_timer += 1
-            if game_over_timer > game_over_time then
-                show_splash = true
-                game_over = false
-                game_over_timer = 0
-                wip_admonished = false
-                sprint_number = 1
-                burndown = 0
-                capacity = sprint_capacity
-                backlog = {}
-                falling_tasks = {}
-                unplanned_tasks = {}
-            end
-        else
-            if bug_found then
-                bug_timer -= 1
-                if bug_timer <= 0 then
-                    bug_found = false
-                end
-            else
-                move_bucket()
-                update_falling_tasks()
-                if #falling_tasks < 3 and (#backlog > 0 or #unplanned_tasks > 0) then
-                    add_falling_task()
-                end
-                if capacity <= 0 then
-                    game_over = true
-                elseif #backlog == 0 and #falling_tasks == 0 and #unplanned_tasks == 0 then
-                    if sprint_number == 1 and burndown < sprint_capacity then
-                        wip_admonished = true
-                    end
-                    sprint_number += 1
-                    capacity = sprint_capacity
-                    -- carry over remaining tasks
-                    for task in all(falling_tasks) do
-                        add(backlog, task)
-                    end
-                    falling_tasks = {}
-                    unplanned_tasks = {}
-                    -- initialize new tasks for the new sprint
-                    init_backlog()
-                    burndown = 0
-                    sfx(1) -- happy fanfare for completing a sprint
-                end
-            end
-        end
-    end
-
-    -- update capacity increase message timer
-    if capacity_increase_message then
-        capacity_increase_timer -= 1
-        if capacity_increase_timer <= 0 then
-            capacity_increase_message = false
-        end
+        update_board()
     end
 end
 
--- main draw loop
+-- draw
 function _draw()
     if show_splash then
         draw_splash()
     else
         draw_ui()
-        if game_over then
-            draw_game_over()
-        end
     end
 end
 
--- sound effects
--- sfx 0: happy fanfare for catching a card
--- sfx 1: happy fanfare for completing a sprint
--- sfx 2: buzzer sound for finding a bug
--- sfx 3: capacity increase sound
-
--- music
--- music 0: intro music
-
 -- initialize game
 init_backlog()
-
 __gfx__
 0001c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00c1cc00007777000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
